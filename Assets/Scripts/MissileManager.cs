@@ -63,14 +63,16 @@ public class MissileCollisionSystem : JobComponentSystem
     {
     }
 
-    // [BurstCompile]
-    struct Job : IJobChunk
+    [BurstCompile]
+    struct MyJob : IJobChunk
     {
         public EntityCommandBuffer.Concurrent CommandBuffer;
         [ReadOnly] public ArchetypeChunkEntityType EntityType;
         [ReadOnly] public ArchetypeChunkComponentType<Translation> TranslationType;
         [ReadOnly] public ArchetypeChunkComponentType<CollisionInfoComponent> InfoType;
-        
+        public Entity ExplosionPrefab;
+        public float Time;
+
         public void Execute(ArchetypeChunk chunk, int chunkIndex, int firstEntityIndex)
         {
             var entities = chunk.GetNativeArray(EntityType);
@@ -83,7 +85,7 @@ public class MissileCollisionSystem : JobComponentSystem
                     var entity = entities[i];
                     CommandBuffer.DestroyEntity(chunkIndex, entity);
                     ref var translation = ref chunkTranslations.AsReadOnlyRef(i);
-                    ExplosionSystem.Instantiate(CommandBuffer, chunkIndex /* jobIndex */, translation.Value);
+                    ExplosionSystem.Instantiate(CommandBuffer, chunkIndex /* jobIndex */, translation.Value, ExplosionPrefab, Time);
                 }
             }
         }
@@ -92,11 +94,13 @@ public class MissileCollisionSystem : JobComponentSystem
 	protected override unsafe JobHandle OnUpdate(JobHandle handle)
 	{
         var commandBuffer = _entityCommandBufferSystem.CreateCommandBuffer().ToConcurrent();
-        var job = new Job {
+        var job = new MyJob {
             CommandBuffer = commandBuffer,
             EntityType = GetArchetypeChunkEntityType(),
             TranslationType = GetArchetypeChunkComponentType<Translation>(true /* isReadOnly */),
             InfoType = GetArchetypeChunkComponentType<CollisionInfoComponent>(true /* isReadOnly */),
+            ExplosionPrefab = ExplosionSystem.PrefabEntity,
+            Time = (float)UTJ.Time.GetCurrent(),
         };
         handle = job.Schedule(_query, handle);
         _entityCommandBufferSystem.AddJobHandleForProducer(handle);
@@ -111,7 +115,7 @@ public class MissileSystem : JobComponentSystem
 
 	public static Entity Instantiate(Entity prefab, float3 pos, quaternion rot)
 	{
-        var em = World.Active.EntityManager;
+        var em = World.DefaultGameObjectInjectionWorld.EntityManager;
 		var entity = em.Instantiate(prefab);
 #if UNITY_EDITOR
         em.SetName(entity, "missile");
@@ -119,7 +123,7 @@ public class MissileSystem : JobComponentSystem
 		em.SetComponentData(entity, new Translation { Value = pos, });
 		em.SetComponentData(entity, new Rotation { Value = rot, });
         em.SetComponentData(entity, new MissileComponent { Target = new float3(0, 0, 0), });
-        em.SetComponentData(entity, AlivePeriod.Create(Time.GetCurrent(), 2f /* period */));
+        em.SetComponentData(entity, AlivePeriod.Create(UTJ.Time.GetCurrent(), 2f /* period */));
         TrailSystem.Instantiate(entity, pos, 0.5f /* width */, Color.white,
                                 new float3(0f, 0f, -0.5f) /* offset */, 4f/60f /* update_interval */);
         return entity;
@@ -162,8 +166,8 @@ public class MissileSystem : JobComponentSystem
     {
     }
 
-    // [BurstCompile]
-    struct Job : IJobChunk
+    [BurstCompile]
+    struct MyJob : IJobChunk
     {
         public EntityCommandBuffer.Concurrent CommandBuffer;
         public float Time;
@@ -174,6 +178,7 @@ public class MissileSystem : JobComponentSystem
         [ReadOnly] public ArchetypeChunkComponentType<PhysicsMass> PhysicsMassType;
         [ReadOnly] public ArchetypeChunkComponentType<MissileComponent> MissileType;
         [ReadOnly] public ArchetypeChunkComponentType<AlivePeriod> AlivePeriodType;
+        public Entity ExplosionPrefab;
         
         public void Execute(ArchetypeChunk chunk, int chunkIndex, int firstEntityIndex)
         {
@@ -201,7 +206,7 @@ public class MissileSystem : JobComponentSystem
                     pv.ApplyLinearImpulse(pm, math.mul(rotation, new float3(0, 0, 400f*Dt)));
                 }
                 if (ap.GetRemainTime(Time) < 0f) {
-                    ExplosionSystem.Instantiate(CommandBuffer, chunkIndex /* jobIndex */, translation);
+                    ExplosionSystem.Instantiate(CommandBuffer, chunkIndex /* jobIndex */, translation, ExplosionPrefab, Time);
                 }
             }
         }
@@ -210,16 +215,17 @@ public class MissileSystem : JobComponentSystem
 	protected override unsafe JobHandle OnUpdate(JobHandle handle)
 	{
         var commandBuffer = _entityCommandBufferSystem.CreateCommandBuffer().ToConcurrent();
-        var job = new Job {
+        var job = new MyJob {
             CommandBuffer = commandBuffer,
-            Time = Time.GetCurrent(),
-            Dt = Time.GetDt(),
+            Time = UTJ.Time.GetCurrent(),
+            Dt = UTJ.Time.GetDt(),
             TranslationType = GetArchetypeChunkComponentType<Translation>(true /* isReadOnly */),
             RotationType = GetArchetypeChunkComponentType<Rotation>(true /* isReadOnly */),
             PhysicsVelocityType = GetArchetypeChunkComponentType<PhysicsVelocity>(false /* isReadOnly */),
             PhysicsMassType = GetArchetypeChunkComponentType<PhysicsMass>(true /* isReadOnly */),
             MissileType = GetArchetypeChunkComponentType<MissileComponent>(true /* isReadOnly */),
             AlivePeriodType = GetArchetypeChunkComponentType<AlivePeriod>(true /* isReadOnly */),
+            ExplosionPrefab = ExplosionSystem.PrefabEntity,
         };
         handle = job.Schedule(_query, handle);
         _entityCommandBufferSystem.AddJobHandleForProducer(handle);

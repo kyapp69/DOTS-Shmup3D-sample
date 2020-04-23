@@ -38,7 +38,7 @@ public class ExplosionManager : MonoBehaviour, IDeclareReferencedPrefabs, IConve
 public class ExplosionSystem : JobComponentSystem
 {
     static Entity _prefabEntity;
-    static Random _random = new Random();
+    public static Entity PrefabEntity { get { return _prefabEntity; } }
 
     EntityQuery _query;
     NativeList<Matrix4x4> _batchMatrices;
@@ -48,18 +48,18 @@ public class ExplosionSystem : JobComponentSystem
     public static void Initialize(Entity prefabEntity)
     {
         _prefabEntity = prefabEntity;
-        _random.InitState(12345);
     }
 
-	public static Entity Instantiate(EntityCommandBuffer.Concurrent ecb, int jobIndex, float3 pos)
+	public static Entity Instantiate(EntityCommandBuffer.Concurrent ecb, int jobIndex, float3 pos, Entity prefab, float time)
 	{
-		var entity = ecb.Instantiate(jobIndex, _prefabEntity);
-		ecb.SetComponent(jobIndex, entity, new AlivePeriod { StartTime = (float)Time.GetCurrent(), Period = 1f, });
+		var entity = ecb.Instantiate(jobIndex, prefab);
+		ecb.SetComponent(jobIndex, entity, new AlivePeriod { StartTime = time, Period = 1f, });
 
         var rot = quaternion.identity;
         var mat = new float4x4(rot, pos);
-        mat.c0.w = Time.GetCurrent();
-        var rotZ = _random.NextFloat() * math.PI * 2f;
+        mat.c0.w = time;
+        var random = new Random((uint)pos.GetHashCode());
+        var rotZ = random.NextFloat() * math.PI * 2f;
         mat.c1.w = rotZ;
 		ecb.SetComponent(jobIndex, entity, new ExplosionComponent { Matrix = mat, });
         return entity;
@@ -67,17 +67,18 @@ public class ExplosionSystem : JobComponentSystem
 
 	public static Entity Instantiate(float3 pos)
 	{
-        var entityManager = World.Active.EntityManager;
+        var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
 		var entity = entityManager.Instantiate(_prefabEntity);
 #if UNITY_EDITOR
         entityManager.SetName(entity, "explosion");
 #endif
-		entityManager.SetComponentData(entity, new AlivePeriod { StartTime = (float)Time.GetCurrent(), Period = 1f, });
+		entityManager.SetComponentData(entity, new AlivePeriod { StartTime = (float)UTJ.Time.GetCurrent(), Period = 1f, });
 
         var rot = quaternion.identity;
         var mat = new float4x4(rot, pos);
-        mat.c0.w = Time.GetCurrent();
-        var rotZ = _random.NextFloat() * math.PI * 2f;
+        mat.c0.w = UTJ.Time.GetCurrent();
+        var random = new Random((uint)pos.GetHashCode());
+        var rotZ = random.NextFloat() * math.PI * 2f;
         mat.c1.w = rotZ;
 		entityManager.SetComponentData(entity, new ExplosionComponent { Matrix = mat, });
         return entity;
@@ -100,7 +101,7 @@ public class ExplosionSystem : JobComponentSystem
     }
 
     [BurstCompile]
-    struct Job : IJob
+    struct MyJob : IJob
     {
         public float Time;
         [ReadOnly] public ArchetypeChunkComponentType<ExplosionComponent> ExplosionType;
@@ -125,8 +126,8 @@ public class ExplosionSystem : JobComponentSystem
         _batchMatrices.Clear();
 
         var chunkArray = _query.CreateArchetypeChunkArray(Allocator.TempJob);
-        var job = new Job {
-            Time = Time.GetCurrent(),
+        var job = new MyJob {
+            Time = UTJ.Time.GetCurrent(),
             ExplosionType = GetArchetypeChunkComponentType<ExplosionComponent>(),
             ChunkArray = chunkArray,
             Matrices = _batchMatrices,
@@ -216,7 +217,7 @@ public class RenderExplosionSystem : ComponentSystem
 
 	protected override void OnUpdate()
 	{
-        var currentTime = Time.GetCurrent();
+        var currentTime = UTJ.Time.GetCurrent();
 		_material.SetFloat(MaterialCurrentTime, currentTime);
 
         Sync();

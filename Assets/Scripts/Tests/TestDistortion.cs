@@ -16,11 +16,12 @@ public class TestDistortion : MonoBehaviour
         for (var i = 0; i < 1; ++i)
         {
             var pos = random_.NextFloat3Direction() * 4f;
-            DistortionSystem.Instantiate(World.Active.EntityManager,
+            DistortionSystem.Instantiate(World.DefaultGameObjectInjectionWorld.EntityManager,
                                          DistortionManager.Prefab,
                                          pos,
                                          10f /* period */,
-                                         1f /* size */);
+                                         1f /* size */,
+                                         Time.GetCurrent());
         }
     }
 

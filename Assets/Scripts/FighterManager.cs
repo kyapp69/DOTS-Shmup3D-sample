@@ -68,7 +68,7 @@ public class FighterSystem : JobComponentSystem
 
 	public static Entity Instantiate(Entity prefab, float3 pos, quaternion rot, int replayIndex)
 	{
-        var em = World.Active.EntityManager;
+        var em = World.DefaultGameObjectInjectionWorld.EntityManager;
 		var entity = em.Instantiate(prefab);
 #if UNITY_EDITOR
         em.SetName(entity, "fighter");
@@ -140,7 +140,7 @@ public class FighterSystem : JobComponentSystem
         #if RECORDING
         controller_buffer_ = new NativeList<ControllerUnit>(ControllerBuffer.MAX_FRAMES, Allocator.Persistent);
         controller_device_ = new ControllerDevice(controller_buffer_);
-        controller_device_.start(Time.GetCurrent());
+        controller_device_.start(UTJ.Time.GetCurrent());
         #else
         _controllerBuffer = ControllerBuffer.Load<ControllerUnit>("controller.bin");
         #endif
@@ -220,8 +220,8 @@ public class FighterSystem : JobComponentSystem
     }
 #endif
 
-    // [BurstCompile]
-    struct Job : IJobChunk
+    [BurstCompile]
+    struct MyJob : IJobChunk
     {
         [DeallocateOnJobCompletion] [ReadOnly] public NativeArray<Entity> TargetableArray;
         [ReadOnly] public ComponentDataFromEntity<Translation> TargetableTranslations;
@@ -283,8 +283,9 @@ public class FighterSystem : JobComponentSystem
                 {
                     float minDist = float.MaxValue;
                     Entity targetEntity = Entity.Null;
-                    foreach (var entity in TargetableArray)
+                    for (var j = 0; j < TargetableArray.Length; ++j)
                     {
+                        var entity = TargetableArray[j];
                         if (TargetableTranslations.Exists(entity)) {
                             var pos = TargetableTranslations[entity].Value;
                             var len2 = math.lengthsq(pos - translation);
@@ -419,14 +420,16 @@ public class FighterSystem : JobComponentSystem
                                                    BeamPrefabEntity,
                                                    translation+firePos0,
                                                    rotation,
-                                                   Param.BulletVelocity);
+                                                   Param.BulletVelocity,
+                                                   Time);
                             var firePos1 = math.mul(rotation, new float3(-0.338f, 0.125f, 1.219f));
                             BeamSystem.Instantiate(CommandBuffer,
                                                    chunkIndex /* jobIndex */,
                                                    BeamPrefabEntity,
                                                    translation+firePos1,
                                                    rotation,
-                                                   Param.BulletVelocity);
+                                                   Param.BulletVelocity,
+                                                   Time);
                             fighter.LastBeamFired = Time;
                         }
                     }
@@ -462,13 +465,15 @@ public class FighterSystem : JobComponentSystem
                                                  DistortionPrefabEntity,
                                                  math.mul(rotation, FighterConfig.BurnerLeft) + translation,
                                                  0.2f /* period */,
-                                                 1f /* size */);
+                                                 1f /* size */,
+                                                 Time);
                     DistortionSystem.Instantiate(CommandBuffer,
                                                  chunkIndex /* jobIndex */,
                                                  DistortionPrefabEntity,
                                                  math.mul(rotation, FighterConfig.BurnerRight) + translation,
                                                  0.2f /* period */,
-                                                 1f /* size */);
+                                                 1f /* size */,
+                                                 Time);
                 }
 
 
@@ -511,7 +516,7 @@ public class FighterSystem : JobComponentSystem
         }
         {
             if (m_physicsWorldSystem == null)
-                m_physicsWorldSystem = Unity.Entities.World.Active.GetExistingSystem<BuildPhysicsWorld>();
+                m_physicsWorldSystem = World.DefaultGameObjectInjectionWorld.GetExistingSystem<BuildPhysicsWorld>();
             var cast_job = new CastJob {
                 world = m_physicsWorldSystem.PhysicsWorld.CollisionWorld,
                 TranslationType = GetArchetypeChunkComponentType<Translation>(true /* isReadOnly */),
@@ -526,10 +531,10 @@ public class FighterSystem : JobComponentSystem
             if (primary_entity_ != Entity.Null) {
                 var ppos = last_primary_fighter_pos_[0];
                 var tpos = last_primary_target_pos_[0];
-                controller_device_.update(Time.GetCurrent(), ppos, tpos);
+                controller_device_.update(UTJ.Time.GetCurrent(), ppos, tpos);
             }
 #endif
-            var job = new Job {
+            var job = new MyJob {
                 TargetableArray = targetableArray,
                 TargetableTranslations = GetComponentDataFromEntity<Translation>(),
                 Param = ParameterManager.Parameter.FighterParameter,
@@ -538,8 +543,8 @@ public class FighterSystem : JobComponentSystem
                 MissilePrefabEntity = MissileManager.Prefab,
                 TrailPrefabEntity = TrailManager.Prefab,
                 DistortionPrefabEntity = DistortionManager.Prefab,
-                Time = Time.GetCurrent(),
-                Dt = Time.GetDt(),
+                Time = UTJ.Time.GetCurrent(),
+                Dt = UTJ.Time.GetDt(),
 #if RECORDING
                 last_primary_fighter_pos_ = last_primary_fighter_pos_,
                 last_primary_target_pos_ = last_primary_target_pos_,

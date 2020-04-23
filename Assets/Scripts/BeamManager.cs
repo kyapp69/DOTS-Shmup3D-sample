@@ -43,31 +43,31 @@ public class BeamSystem : JobComponentSystem
     public NativeList<Matrix4x4> BatchMatrices => _batchMatrices;
     RenderBeamSystem _renderBeamSystem;
 
-	public static Entity Instantiate(EntityCommandBuffer.Concurrent ecb, int jobIndex, Entity prefab, float3 pos, quaternion rot, float velocity)
+	public static Entity Instantiate(EntityCommandBuffer.Concurrent ecb, int jobIndex, Entity prefab, float3 pos, quaternion rot, float velocity, float currentTime)
 	{
         var vel = math.mul(rot, new float3(0, 0, velocity));
-        return Instantiate(ecb, jobIndex, prefab, pos, rot, vel);
+        return Instantiate(ecb, jobIndex, prefab, pos, rot, vel, currentTime);
     }
-	public static Entity Instantiate(EntityCommandBuffer.Concurrent ecb, int jobIndex, Entity prefab, float3 pos, float3 vel)
+	public static Entity Instantiate(EntityCommandBuffer.Concurrent ecb, int jobIndex, Entity prefab, float3 pos, float3 vel, float currentTime)
 	{
         var up = new float3(0f, 1f, 0f);
         var rot = quaternion.LookRotationSafe(vel, up);
-        return Instantiate(ecb, jobIndex, prefab, pos, rot, vel);
+        return Instantiate(ecb, jobIndex, prefab, pos, rot, vel, currentTime);
     }
-    static Entity Instantiate(EntityCommandBuffer.Concurrent ecb, int jobIndex, Entity prefab, float3 pos, quaternion rot, float3 vel)
+    static Entity Instantiate(EntityCommandBuffer.Concurrent ecb, int jobIndex, Entity prefab, float3 pos, quaternion rot, float3 vel, float currentTime)
 	{
 		var entity = ecb.Instantiate(jobIndex, prefab);
 		ecb.SetComponent(jobIndex, entity, new Translation { Value = pos, });
 		ecb.SetComponent(jobIndex, entity, new Rotation { Value = rot, });
         ecb.SetComponent(jobIndex, entity, new PhysicsVelocity() { Linear = vel, });
-		ecb.SetComponent(jobIndex, entity, new AlivePeriod { StartTime = (float)Time.GetCurrent(), Period = 2f, });
+		ecb.SetComponent(jobIndex, entity, new AlivePeriod { StartTime = currentTime, Period = 2f, });
         ecb.SetComponent(jobIndex, entity, new CachedBeamMatrix {
                 Matrix = new float4x4(rot, pos),
             });
         return entity;
     }
 
-    public static Entity Instantiate(EntityManager em, Entity prefab, float3 pos, float3 vel)
+    public static Entity Instantiate(EntityManager em, Entity prefab, float3 pos, float3 vel, float currentTime)
 	{
         var up = new float3(0, 1, 0);
         var rot = quaternion.LookRotationSafe(vel, up);
@@ -75,7 +75,7 @@ public class BeamSystem : JobComponentSystem
 		em.SetComponentData(entity, new Translation { Value = pos, });
 		em.SetComponentData(entity, new Rotation { Value = rot, });
         em.SetComponentData(entity, new PhysicsVelocity() { Linear = vel, });
-		em.SetComponentData(entity, new AlivePeriod { StartTime = (float)Time.GetCurrent(), Period = 3f, });
+		em.SetComponentData(entity, new AlivePeriod { StartTime = currentTime, Period = 3f, });
         em.SetComponentData(entity, new CachedBeamMatrix {
                 Matrix = new float4x4(rot, pos),
             });
@@ -100,7 +100,7 @@ public class BeamSystem : JobComponentSystem
     }
 
     [BurstCompile]
-    struct Job : IJob
+    struct MyJob : IJob
     {
         [ReadOnly] public ArchetypeChunkComponentType<Translation> TranslationType;
         [ReadOnly] public ArchetypeChunkComponentType<CachedBeamMatrix> CachedBeamMatrixType;
@@ -132,7 +132,7 @@ public class BeamSystem : JobComponentSystem
         _batchMatrices.Clear();
 
         var chunkArray = _query.CreateArchetypeChunkArray(Allocator.TempJob);
-        var job = new Job {
+        var job = new MyJob {
             TranslationType = GetArchetypeChunkComponentType<Translation>(),
             CachedBeamMatrixType = GetArchetypeChunkComponentType<CachedBeamMatrix>(),
             BeamType = GetArchetypeChunkComponentType<BeamComponent>(),
@@ -162,14 +162,15 @@ public class BeamCollisionSystem : JobComponentSystem
         _entityCommandBufferSystem = World.GetOrCreateSystem<BeginInitializationEntityCommandBufferSystem>();
     }        
 
-    // [BurstCompile]
-    struct Job : IJobChunk
+    [BurstCompile]
+    struct MyJob : IJobChunk
     {
         public EntityCommandBuffer.Concurrent CommandBuffer;
         public Entity SparkPrefabEntity;
         [ReadOnly] public ArchetypeChunkEntityType EntityType;
         [ReadOnly] public ArchetypeChunkComponentType<CollisionInfoComponent> InfoType;
         [ReadOnly] public ArchetypeChunkComponentType<BeamComponent> BeamType;
+        public float Time;
 
         public void Execute(ArchetypeChunk chunk, int chunkIndex, int firstEntityIndex)
         {
@@ -186,7 +187,7 @@ public class BeamCollisionSystem : JobComponentSystem
                     ref var beam = ref chunkBeams.AsReadOnlyRef(i);
                     SparkSystem.Instantiate(CommandBuffer, 0 /* jobIndex */,
                                             SparkPrefabEntity,
-                                            info.Position, info.Normal, beam.ColorBitPattern);
+                                            info.Position, info.Normal, beam.ColorBitPattern, Time);
                 }
             }
         }
@@ -194,12 +195,13 @@ public class BeamCollisionSystem : JobComponentSystem
 
 	protected override JobHandle OnUpdate(JobHandle handle)
 	{
-        var job = new Job {
+        var job = new MyJob {
             CommandBuffer = _entityCommandBufferSystem.CreateCommandBuffer().ToConcurrent(),
             SparkPrefabEntity = SparkManager.Prefab,
             EntityType = GetArchetypeChunkEntityType(),
             InfoType = GetArchetypeChunkComponentType<CollisionInfoComponent>(),
             BeamType = GetArchetypeChunkComponentType<BeamComponent>(),
+            Time = (float)UTJ.Time.GetCurrent(),
         };
         handle = job.Schedule(_query, handle);
         _entityCommandBufferSystem.AddJobHandleForProducer(handle);
